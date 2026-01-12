@@ -25,11 +25,8 @@ const mailPort = process.env.MAIL_PORT;
 const mailUser = process.env.MAIL_USER;
 const mailPass = process.env.MAIL_PASS;
 
-
-// Connect to MongoDB
 mongoose.connect(dbURI);
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
@@ -38,19 +35,22 @@ app.use(session({
   saveUninitialized: true,
   cookie: {
     httpOnly: true,
-    //secure: process.env.NODE_ENV === 'production',
     maxAge: 1000 * 60 * 60 * 24
   }
 }));
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Email configuration
 const transporter = nodemailer.createTransport({
   service: mailService,
   host: mailHost,
   port: mailPort,
   secure: false,
+  debug: true,  
+  logger: true,
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
   auth: {
     user: mailUser,
     pass: mailPass
@@ -99,7 +99,6 @@ Co na Ciebie czeka:
   return { text: textContent };
 }
 
-// Middleware to check authentication
 const requireAuth = (req, res, next) => {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -107,7 +106,6 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-// Helper function to check if course is completed
 async function checkCourseCompletion(userId, courseId) {
   try {
     const user = await User.findById(userId);
@@ -132,7 +130,7 @@ async function checkCourseCompletion(userId, courseId) {
     if (courseCompleted && !user.completedCourses.includes(courseId)) {
       user.completedCourses.push(courseId);
       await user.save();
-      return true; // Kurs został właśnie ukończony
+      return true;
     }
     
     return courseCompleted;
@@ -142,29 +140,24 @@ async function checkCourseCompletion(userId, courseId) {
   }
 }
 
-// Routes
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// User registration and login with magic link
 app.post('/auth', async (req, res) => {
   try {
     const { email } = req.body;
     let user = await User.findOne({ email });
     
     if (!user) {
-      // If user doesn't exist, create a new one
       user = new User({ email });
     }
     
-    // Generate magic link token
     const token = crypto.randomBytes(32).toString('hex');
     user.magicLinkToken = token;
-    user.magicLinkExpires = Date.now() + 3600000; // 1 hour from now
+    user.magicLinkExpires = Date.now() + 3600000;
     await user.save();
     
-    // Send magic link email
     const magicLink = `${HOST}:${PORT}/verify?token=${token}`;
     const emailContent = generateMagicLinkEmail(magicLink, email);
 
@@ -182,7 +175,6 @@ app.post('/auth', async (req, res) => {
   }
 });
 
-// Verify magic link
 app.get('/verify', async (req, res) => {
   try {
     const { token } = req.query;
@@ -205,7 +197,6 @@ app.get('/verify', async (req, res) => {
       `);
     }
     
-    // Clear the token and set session
     user.magicLinkToken = undefined;
     user.magicLinkExpires = undefined;
     await user.save();
@@ -226,7 +217,6 @@ app.get('/verify', async (req, res) => {
   }
 });
 
-// Dashboard route (protected)
 app.get('/dashboard', (req, res) => {
   if (!req.session.userId) {
     return res.redirect('/');
@@ -234,29 +224,24 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
-// Get all courses (protected route)
 app.get('/api/courses', requireAuth, async (req, res) => {
   try {
     const courses = await Course.find().populate('lessons').populate('quiz');
     
-    // Pobierz informacje o ukończonych kursach dla zalogowanego użytkownika
     const user = await User.findById(req.session.userId);
     const completedCourseIds = user.completedCourses.map(id => id.toString());
     const readLessonIds = user.readLessons.map(id => id.toString());
     const passedQuizIds = user.passedQuizzes.map(id => id.toString());
     
-    // Dodaj flagę completed i informacje o postępie do każdego kursu
     const coursesWithProgress = courses.map(course => {
       const courseObj = course.toObject();
       courseObj.completed = completedCourseIds.includes(course._id.toString());
       
-      // Oblicz postęp kursu
       const totalLessons = course.lessons.length;
       const readLessonsInCourse = course.lessons.filter(lesson => 
         readLessonIds.includes(lesson._id.toString())
       ).length;
       
-      // Sprawdź status testu
       let quizStatus = 'not_required';
       if (course.quiz) {
         quizStatus = passedQuizIds.includes(course.quiz._id.toString()) ? 'passed' : 'not_passed';
@@ -279,7 +264,6 @@ app.get('/api/courses', requireAuth, async (req, res) => {
   }
 });
 
-// Get a specific course with lessons (protected route)
 app.get('/api/courses/:id', requireAuth, async (req, res) => {
   try {
     const course = await Course.findById(req.params.id).populate('lessons').populate('quiz');
@@ -287,7 +271,6 @@ app.get('/api/courses/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Course not found' });
     }
     
-    // Dodaj informacje o przeczytanych lekcjach
     const user = await User.findById(req.session.userId);
     const readLessonIds = user.readLessons.map(id => id.toString());
     const passedQuizIds = user.passedQuizzes.map(id => id.toString());
@@ -297,7 +280,6 @@ app.get('/api/courses/:id', requireAuth, async (req, res) => {
       read: readLessonIds.includes(lesson._id.toString())
     }));
     
-    // Dodaj informacje o quizie
     if (courseObj.quiz) {
       courseObj.quiz.hasPassed = passedQuizIds.includes(courseObj.quiz._id.toString());
     }
@@ -309,12 +291,9 @@ app.get('/api/courses/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Get lessons for a specific course (protected route)
 app.get('/api/courses/:id/lessons', requireAuth, async (req, res) => {
   try {
     const lessons = await Lesson.find({ course: req.params.id });
-    
-    // Dodaj informacje o przeczytanych lekcjach
     const user = await User.findById(req.session.userId);
     const readLessonIds = user.readLessons.map(id => id.toString());
     
@@ -330,7 +309,6 @@ app.get('/api/courses/:id/lessons', requireAuth, async (req, res) => {
   }
 });
 
-// Get a specific lesson (protected route)
 app.get('/api/lessons/:id', requireAuth, async (req, res) => {
   try {
     const lesson = await Lesson.findById(req.params.id).populate('course', 'title');
@@ -338,10 +316,8 @@ app.get('/api/lessons/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Lesson not found' });
     }
     
-    // Sprawdź, czy lekcja została przeczytana
     const user = await User.findById(req.session.userId);
     const readLessonIds = user.readLessons.map(id => id.toString());
-    
     const lessonObj = lesson.toObject();
     lessonObj.read = readLessonIds.includes(lesson._id.toString());
     
@@ -351,26 +327,22 @@ app.get('/api/lessons/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Mark lesson as read (protected route)
 app.post('/api/lessons/:id/read', requireAuth, async (req, res) => {
   try {
     const lessonId = req.params.id;
     const userId = req.session.userId;
     
-    // Sprawdź, czy lekcja istnieje
     const lesson = await Lesson.findById(lessonId);
     if (!lesson) {
       return res.status(404).json({ error: 'Lesson not found' });
     }
     
-    // Dodaj lekcję do przeczytanych lekcji użytkownika (jeśli jeszcze nie jest przeczytana)
     const user = await User.findById(userId);
     if (!user.readLessons.includes(lessonId)) {
       user.readLessons.push(lessonId);
       await user.save();
     }
     
-    // Sprawdź, czy kurs został ukończony
     const courseCompleted = await checkCourseCompletion(userId, lesson.course);
     
     res.json({ 
@@ -383,7 +355,6 @@ app.post('/api/lessons/:id/read', requireAuth, async (req, res) => {
   }
 });
 
-// Get quiz for a course
 app.get('/api/courses/:id/quiz', requireAuth, async (req, res) => {
   try {
     const course = await Course.findById(req.params.id).populate('quiz');
@@ -391,7 +362,6 @@ app.get('/api/courses/:id/quiz', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Quiz not found for this course' });
     }
     
-    // Sprawdź liczbę prób użytkownika
     const attempts = await QuizAttempt.find({
       user: req.session.userId,
       quiz: course.quiz._id
@@ -400,7 +370,6 @@ app.get('/api/courses/:id/quiz', requireAuth, async (req, res) => {
     const user = await User.findById(req.session.userId);
     const hasPassed = user.passedQuizzes.includes(course.quiz._id);
     
-    // Nie pokazuj poprawnych odpowiedzi, jeśli użytkownik jeszcze nie zaliczył
     const quizData = {
       _id: course.quiz._id,
       title: course.quiz.title,
@@ -412,13 +381,12 @@ app.get('/api/courses/:id/quiz', requireAuth, async (req, res) => {
         _id: q._id,
         question: q.question,
         options: q.options
-        // Nie wysyłamy correctAnswer i explanation
+        
       })),
       attempts: attempts.length,
       maxAttempts: course.quiz.maxAttempts,
       hasPassed: hasPassed,
-      //canTakeQuiz: !hasPassed && attempts.length < course.quiz.maxAttempts
-      canTakeQuiz: true // Always can redo
+      canTakeQuiz: true 
     };
     
     res.json(quizData);
@@ -428,7 +396,6 @@ app.get('/api/courses/:id/quiz', requireAuth, async (req, res) => {
   }
 });
 
-// Submit quiz answers
 app.post('/api/quizzes/:id/submit', requireAuth, async (req, res) => {
   try {
     const { answers, timeSpent } = req.body;
@@ -440,19 +407,9 @@ app.post('/api/quizzes/:id/submit', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Quiz not found' });
     }
     
-    // Sprawdź, czy użytkownik może jeszcze podejść do testu
-    //const attempts = await QuizAttempt.find({ user: userId, quiz: quizId });
     const user = await User.findById(userId);
     const wasAlreadyPassed = user.passedQuizzes.includes(quizId);
-    /*if (user.passedQuizzes.includes(quizId)) {
-      return res.status(400).json({ error: 'Quiz already passed' });
-    }
-    
-    if (attempts.length >= quiz.maxAttempts) {
-      return res.status(400).json({ error: 'Maximum attempts exceeded' });
-    }*/
-    
-    // Oblicz wynik
+
     let correctAnswers = 0;
     const results = quiz.questions.map((question, index) => {
       const userAnswer = answers[index];
@@ -470,8 +427,6 @@ app.post('/api/quizzes/:id/submit', requireAuth, async (req, res) => {
     
     const score = Math.round((correctAnswers / quiz.questions.length) * 100);
     const passed = score >= quiz.passingScore;
-    
-    // Zapisz próbę
     const attempt = new QuizAttempt({
       user: userId,
       quiz: quizId,
@@ -482,19 +437,16 @@ app.post('/api/quizzes/:id/submit', requireAuth, async (req, res) => {
     });
     await attempt.save();
     
-    // Jeśli zaliczony po raz pierwszy, dodaj do zaliczonych testów
     if (passed && !wasAlreadyPassed) {
       user.passedQuizzes.push(quizId);
       await user.save();
       
-      // Sprawdź, czy kurs został ukończony
       const course = await Course.findOne({ quiz: quizId });
       if (course) {
         await checkCourseCompletion(userId, course._id);
       }
     }
     
-    // Sprawdź liczbę prób
     const totalAttempts = await QuizAttempt.countDocuments({
       user: userId,
       quiz: quizId
@@ -515,7 +467,6 @@ app.post('/api/quizzes/:id/submit', requireAuth, async (req, res) => {
   }
 });
 
-// Get quiz results
 app.get('/api/quizzes/:id/results', requireAuth, async (req, res) => {
   try {
     const attempts = await QuizAttempt.find({
@@ -529,21 +480,19 @@ app.get('/api/quizzes/:id/results', requireAuth, async (req, res) => {
   }
 });
 
-// Get top 10 users by score (protected route)
 app.get('/api/leaderboard', requireAuth, async (req, res) => {
   try {
     const users = await User.find()
       .select('email completedCourses')
       .populate('completedCourses', 'title');
     
-    // Sortuj użytkowników według liczby ukończonych kursów (malejąco)
     const sortedUsers = users
       .map(user => ({
         username: user.email.split('@')[0],
         score: user.completedCourses.length
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10); // Pobierz tylko top 10
+      .slice(0, 10);
     
     res.json(sortedUsers);
   } catch (error) {
@@ -551,7 +500,6 @@ app.get('/api/leaderboard', requireAuth, async (req, res) => {
   }
 });
 
-// Get current user info (protected route)
 app.get('/api/user', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.session.userId)
@@ -575,7 +523,6 @@ app.get('/api/user', requireAuth, async (req, res) => {
   }
 });
 
-// Logout route
 app.post('/logout', (req, res) => {
   req.session.destroy((err) => {
     if (err) {

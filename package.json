@@ -4,6 +4,9 @@
   "description": "E-Learning platform create for web 3.0 content",
   "main": "index.js",
   "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+  },
   "author": "Marek Hennig",
   "license": "ISC",
   "dependencies": {

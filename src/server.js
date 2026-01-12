@@ -45,12 +45,13 @@ const transporter = nodemailer.createTransport({
   service: mailService,
   host: mailHost,
   port: mailPort,
-  secure: false,
+  secure: true,
   debug: true,  
   logger: true,
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
+  connectionTimeout: 20000,
+  greetingTimeout: 20000,
+  socketTimeout: 20000,
+  dnsVaprioirty: 'ipv4',
   auth: {
     user: mailUser,
     pass: mailPass

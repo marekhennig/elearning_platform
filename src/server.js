@@ -21,6 +21,7 @@ const PORT = process.env.PORT;
 const HOST = process.env.HOST;
 const dbURI = process.env.MONGO_URI;
 const mailService = process.env.MAIL_SERVICE;
+const mailPort = process.env.MAIL_PORT;
 const mailUser = process.env.MAIL_USER;
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
@@ -67,6 +68,8 @@ const createTransporter = async () => {
     service: mailService,
     debug: true,  
     logger: true,
+    port: mailPort,
+    secure: true,
     connectionTimeout: 20000,
     greetingTimeout: 20000,
     socketTimeout: 20000,

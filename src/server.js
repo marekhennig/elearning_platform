@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import session from 'express-session';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 import { User } from './models/User.js';
 import { Course } from './models/Course.js';
 import { Lesson } from './models/Lesson.js';
@@ -20,10 +21,11 @@ const PORT = process.env.PORT;
 const HOST = process.env.HOST;
 const dbURI = process.env.MONGO_URI;
 const mailService = process.env.MAIL_SERVICE;
-const mailHost = process.env.MAIL_HOST;
-const mailPort = process.env.MAIL_PORT;
 const mailUser = process.env.MAIL_USER;
-const mailPass = process.env.MAIL_PASS;
+const clientId = process.env.CLIENT_ID;
+const clientSecret = process.env.CLIENT_SECRET;
+const refreshToken = process.env.REFRESH_TOKEN;
+const OAuth2 = google.auth.OAuth2;
 
 mongoose.connect(dbURI);
 
@@ -41,22 +43,45 @@ app.use(session({
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const transporter = nodemailer.createTransport({
-  service: mailService,
-  host: mailHost,
-  port: mailPort,
-  secure: true,
-  debug: true,  
-  logger: true,
-  connectionTimeout: 20000,
-  greetingTimeout: 20000,
-  socketTimeout: 20000,
-  dnsVaprioirty: 'ipv4',
-  auth: {
-    user: mailUser,
-    pass: mailPass
-  }
-});
+const createTransporter = async () => {
+  const oauth2Client = new OAuth2(
+    clientId,
+    clientSecret,
+    "https://developers.google.com/oauthplayground"
+  );
+
+  oauth2Client.setCredentials({
+    refresh_token: process.env.REFRESH_TOKEN
+  });
+
+  const accessToken = await new Promise((resolve, reject) => {
+    oauth2Client.getAccessToken((err, token) => {
+      if (err) {
+        reject("Failed to create access token");
+      }
+      resolve(token);
+    });
+  });
+
+  const transporter = nodemailer.createTransport({
+    service: mailService,
+    debug: true,  
+    logger: true,
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 20000,
+    auth: {
+      type: "OAuth2",
+      user: mailUser,
+      accessToken,
+      clientId: clientId,
+      clientSecret: clientSecret,
+      refreshToken: refreshToken
+    }
+  });
+
+  return transporter;
+}
 
 function generateMagicLinkEmail(magicLink, userEmail) {
   const textContent = `
@@ -161,13 +186,18 @@ app.post('/auth', async (req, res) => {
     
     const magicLink = `${HOST}:${PORT}/verify?token=${token}`;
     const emailContent = generateMagicLinkEmail(magicLink, email);
-
-    await transporter.sendMail({
+    const emailOptions = {
       from: 'noreplyelearningplatform@gmail.com',
       to: email,
       subject: 'Your Magic Link Web 3.0 E-Learning Platform',
       text: emailContent.text
-    });
+    };
+    const sendMail = async (emailOptions) => {
+      let emailTransporter = await createTransporter();
+      await emailTransporter.sendMail(emailOptions);
+    };
+
+    await sendMail(emailOptions);
     
     res.json({ message: 'Magic link sent to your email' });
   } catch (error) {

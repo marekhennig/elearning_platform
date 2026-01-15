@@ -2,7 +2,6 @@ import express from 'express';
 import mongoose from 'mongoose';
 import session from 'express-session';
 import crypto from 'crypto';
-import nodemailer from 'nodemailer';
 import { google } from 'googleapis';
 import { User } from './models/User.js';
 import { Course } from './models/Course.js';
@@ -20,8 +19,6 @@ const app = express();
 const PORT = process.env.PORT;
 const HOST = process.env.HOST;
 const dbURI = process.env.MONGO_URI;
-const mailService = process.env.MAIL_SERVICE;
-const mailPort = process.env.MAIL_PORT;
 const mailUser = process.env.MAIL_USER;
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
@@ -44,85 +41,55 @@ app.use(session({
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const createTransporter = async () => {
-  const oauth2Client = new OAuth2(
+const oAuth2Client = new OAuth2(
     clientId,
     clientSecret,
     "https://developers.google.com/oauthplayground"
   );
 
-  oauth2Client.setCredentials({
-    refresh_token: process.env.REFRESH_TOKEN
+  oAuth2Client.setCredentials({
+    refresh_token: refreshToken
   });
 
-  const accessToken = await new Promise((resolve, reject) => {
-    oauth2Client.getAccessToken((err, token) => {
-      if (err) {
-        reject("Failed to create access token");
-      }
-      resolve(token);
-    });
-  });
-
-  const transporter = nodemailer.createTransport({
-    service: mailService,
-    debug: true,  
-    logger: true,
-    port: mailPort,
-    secure: true,
-    connectionTimeout: 20000,
-    greetingTimeout: 20000,
-    socketTimeout: 20000,
-    auth: {
-      type: "OAuth2",
-      user: mailUser,
-      accessToken,
-      clientId: clientId,
-      clientSecret: clientSecret,
-      refreshToken: refreshToken
-    }
-  });
-
-  return transporter;
-}
+  const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
 
 function generateMagicLinkEmail(magicLink, userEmail) {
   const textContent = `
-Welcome in E-Learning Platform about Web 3.0
-ENGLISH:
-
-Hello ${userEmail},
-You requested to sign in to platform.
-
-
-Click this link to sign in: ${magicLink}
-
-Security Notice: This link expires in 1 hour.
-
-What's waiting for you:
-• Access to comprehensive courses
-• Interactive quizzes and assessments  
-• Track your learning progress
-• Compete on the leaderboard
-
----
-
-POLSKI:
-Witaj na platformie edukacyjnej o Web 3.0
-Cześć ${userEmail},
-Zażądałeś zalogowania do platformy.
-
-Kliknij ten link aby się zalogować: ${magicLink}
-
-Informacja o bezpieczeństwie: Ten link wygaśnie za 1 godzinę.
-
-Co na Ciebie czeka:
-• Dostęp do kompleksowych kursów
-• Interaktywne quizy i testy
-• Śledzenie postępów w nauce
-• Rywalizacja w rankingu
-
----
+Welcome in E-Learning Platform about Web 3.0<br>
+ENGLISH:<br>
+<br>
+Hello ${userEmail},<br>
+You requested to sign in to platform.<br>
+<br>
+<br>
+Click this link to sign in: ${magicLink}<br>
+<br>
+Security Notice: This link expires in 1 hour.<br>
+<br>
+What's waiting for you:<br>
+• Access to comprehensive courses<br>
+• Interactive quizzes and assessments<br>
+• Track your learning progress<br>
+• Compete on the leaderboard<br>
+<br>
+---<br>
+<br>
+POLSKI:<br>
+Witaj na platformie edukacyjnej o Web 3.0<br>
+Cześć ${userEmail},<br>
+Zażądałeś zalogowania do platformy.<br>
+<br>
+Kliknij ten link aby się zalogować: ${magicLink}<br>
+<br>
+Informacja o bezpieczeństwie: Ten link wygaśnie za 1 godzinę.<br>
+<br>
+Co na Ciebie czeka:<br>
+• Dostęp do kompleksowych kursów<br>
+• Interaktywne quizy i testy<br>
+• Śledzenie postępów w nauce<br>
+• Rywalizacja w rankingu<br>
+<br>
+---<br>
 `;
 
   return { text: textContent };
@@ -189,18 +156,28 @@ app.post('/auth', async (req, res) => {
     
     const magicLink = `${HOST}:${PORT}/verify?token=${token}`;
     const emailContent = generateMagicLinkEmail(magicLink, email);
-    const emailOptions = {
-      from: 'noreplyelearningplatform@gmail.com',
-      to: email,
-      subject: 'Your Magic Link Web 3.0 E-Learning Platform',
-      text: emailContent.text
-    };
-    const sendMail = async (emailOptions) => {
-      let emailTransporter = await createTransporter();
-      await emailTransporter.sendMail(emailOptions);
-    };
+    const str = [
+    `Content-Type: text/html; charset="UTF-8"\n`,
+    `MIME-Version: 1.0\n`,
+    `Content-Transfer-Encoding: 7bit\n`,
+    `to: ${email}\n`,
+    `from: ${mailUser}\n`,
+    `subject: Your Magic Link Web 3.0 E-Learning Platform\n\n`,
+    `${emailContent.text}`,
+    ].join('');
 
-    await sendMail(emailOptions);
+    const encodedMail = Buffer.from(str)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMail,
+      },
+    });
     
     res.json({ message: 'Magic link sent to your email' });
   } catch (error) {

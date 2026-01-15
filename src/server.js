@@ -154,7 +154,7 @@ app.post('/auth', async (req, res) => {
     user.magicLinkExpires = Date.now() + 3600000;
     await user.save();
     
-    const magicLink = `${HOST}:${PORT}/verify?token=${token}`;
+    const magicLink = `${HOST}/verify?token=${token}`;
     const emailContent = generateMagicLinkEmail(magicLink, email);
     const str = [
     `Content-Type: text/html; charset="UTF-8"\n`,
